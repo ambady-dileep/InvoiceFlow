@@ -60,3 +60,8 @@ class UploadStatusSerializer(serializers.ModelSerializer):
         if not upload.total_rows:
             return 0
         return min(upload.processed_rows * 100 // upload.total_rows, 99)
+
+
+class UploadListSerializer(UploadStatusSerializer):
+    class Meta(UploadStatusSerializer.Meta):
+        fields = [*UploadStatusSerializer.Meta.fields, "original_filename"]

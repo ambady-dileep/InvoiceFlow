@@ -5,20 +5,38 @@ from django.db import DatabaseError
 from django.http import StreamingHttpResponse
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.imports.models import Upload
-from apps.imports.serializers import UploadSerializer, UploadStatusSerializer
+from apps.imports.serializers import (
+    UploadListSerializer,
+    UploadSerializer,
+    UploadStatusSerializer,
+)
 
 logger = logging.getLogger(__name__)
 
 FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r", "\n")
 
 
-class UploadView(APIView):
+class UploadPagination(PageNumberPagination):
+    page_size = 25
+    page_size_query_param = "page_size"
+    max_page_size = 100
+
+
+class UploadView(generics.ListAPIView):
+    serializer_class = UploadListSerializer
+    pagination_class = UploadPagination
     parser_classes = [MultiPartParser]
+
+    def get_queryset(self):
+        return Upload.objects.filter(merchant=self.request.user).order_by(
+            "-created_at", "-id"
+        )
 
     def post(self, request):
         serializer = UploadSerializer(data=request.data)

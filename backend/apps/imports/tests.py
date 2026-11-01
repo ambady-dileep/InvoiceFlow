@@ -331,6 +331,132 @@ class UploadResultTestCase(APITestCase):
         )
 
 
+class UploadListApiTests(UploadResultTestCase):
+    url = reverse("upload")
+
+    def test_uploads_are_listed_newest_first(self):
+        first = self.make_upload()
+        second = self.make_upload()
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 2)
+        self.assertEqual(
+            [upload["upload_id"] for upload in response.data["results"]],
+            [second.id, first.id],
+        )
+
+    def test_list_returns_status_fields_and_the_filename(self):
+        upload = self.make_upload(
+            status=Upload.Status.COMPLETED,
+            total_rows=4,
+            processed_rows=4,
+            successful_rows=3,
+            failed_rows=1,
+        )
+
+        result = self.client.get(self.url).data["results"][0]
+
+        self.assertEqual(
+            set(result),
+            {
+                "upload_id",
+                "status",
+                "progress",
+                "total_rows",
+                "processed_rows",
+                "successful_rows",
+                "failed_rows",
+                "failure_reason",
+                "created_at",
+                "original_filename",
+            },
+        )
+        self.assertEqual(result["upload_id"], upload.id)
+        self.assertEqual(result["original_filename"], "invoices.csv")
+        self.assertEqual(result["progress"], 100)
+        self.assertEqual(result["failed_rows"], 1)
+
+    def test_stored_file_path_is_not_exposed(self):
+        self.make_upload()
+
+        response = self.client.get(self.url)
+
+        self.assertNotIn("uploads/1", str(response.data))
+
+    def test_only_the_merchants_uploads_are_listed(self):
+        mine = self.make_upload()
+        self.make_upload(merchant=self.other_merchant)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["upload_id"], mine.id)
+
+    def test_merchant_parameter_cannot_switch_merchants(self):
+        self.make_upload(merchant=self.other_merchant)
+
+        response = self.client.get(self.url, {"merchant": self.other_merchant.id})
+
+        self.assertEqual(response.data["count"], 0)
+
+    def test_unauthenticated_request_is_rejected(self):
+        self.client.force_authenticate(None)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_merchant_without_uploads_gets_an_empty_list(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 0)
+        self.assertEqual(response.data["results"], [])
+
+    def test_list_is_paginated(self):
+        Upload.objects.bulk_create(
+            Upload(
+                merchant=self.merchant,
+                original_filename=f"{number}.csv",
+                file="uploads/1/invoices.csv",
+            )
+            for number in range(30)
+        )
+
+        first_page = self.client.get(self.url)
+        capped = self.client.get(self.url, {"page_size": 1000})
+        last_page = self.client.get(self.url, {"page": 2})
+
+        self.assertEqual(first_page.data["count"], 30)
+        self.assertEqual(len(first_page.data["results"]), 25)
+        self.assertIn("page=2", first_page.data["next"])
+        self.assertEqual(len(capped.data["results"]), 30)
+        self.assertEqual(len(last_page.data["results"]), 5)
+
+    def test_page_size_is_capped_at_100(self):
+        Upload.objects.bulk_create(
+            Upload(
+                merchant=self.merchant,
+                original_filename=f"{number}.csv",
+                file="uploads/1/invoices.csv",
+            )
+            for number in range(101)
+        )
+
+        response = self.client.get(self.url, {"page_size": 1000})
+
+        self.assertEqual(len(response.data["results"]), 100)
+
+    def test_a_page_uses_only_a_count_and_a_select(self):
+        self.make_upload()
+        self.make_upload()
+
+        with self.assertNumQueries(2):
+            self.client.get(self.url)
+
+
 class UploadStatusApiTests(UploadResultTestCase):
     def get_status(self, upload):
         return self.client.get(reverse("upload-status", args=[upload.id]))
