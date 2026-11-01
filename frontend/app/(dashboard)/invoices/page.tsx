@@ -54,6 +54,7 @@ export default function InvoicesPage() {
 
   const debouncedFilters = useDebounced(filters, DEBOUNCE_MS);
   const query = buildQuery(debouncedFilters, ordering, page);
+  const exportQuery = buildQuery(debouncedFilters, ordering, 1);
   const key = `${query}#${attempt}`;
   const loading = result?.key !== key;
 
@@ -88,7 +89,8 @@ export default function InvoicesPage() {
             </button>
           )}
         </div>
-        <ExportButton query={query} disabled={!data?.count} />
+        {/* The key clears a finished export when the filters or sorting change. */}
+        <ExportButton key={exportQuery} query={exportQuery} disabled={!data?.count} />
       </div>
 
       <InvoiceFilters

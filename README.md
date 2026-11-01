@@ -99,7 +99,7 @@ Invalid `status`, date, or amount values return `400`. A page that does not exis
 
 `GET /api/exports/{id}/` returns `export_id`, `status` (`pending`, `processing`, `completed`, or `failed`), `row_count`, `failure_reason`, `download_url`, and `created_at`. `download_url` is empty until the export is `completed`.
 
-`GET /api/exports/{id}/download/` returns the CSV, with the columns `invoice_number`, `customer_name`, `amount`, `invoice_date`, and `status`. It needs the same `Authorization` header as other endpoints, because files are never served publicly.
+`GET /api/exports/{id}/download/` returns the CSV, with the columns `invoice_number`, `customer_name`, `amount`, `invoice_date`, and `status`, which match the upload format. The internal `id` is not included. It needs the same `Authorization` header as other endpoints, because files are never served publicly.
 
 All export endpoints return `404` for another merchant's export. The download also returns `404` until the export is `completed`.
 
@@ -130,5 +130,6 @@ The assignment does not define an invoice schema, so these are interpretations:
 - Pagination uses offsets, so an invoice added while a merchant is browsing can shift rows between pages and show a row twice.
 - An export reflects invoices when the task reads them, not when the button was clicked. If an upload is still running, the file may include some of its rows.
 - Export files are kept in storage indefinitely, because there is no cleanup job.
-- The Invoices page tracks only the current export, so a page reload loses the link to it. There is no export history.
+- The Invoices page tracks only the current export. Changing the search, filters, or sorting clears it, and so does reloading the page. An export started before that keeps running, but its file can no longer be reached from the page, because there is no export history.
+- Deleting a merchant removes its upload and export records, but not their stored files.
 - In exported text cells, a value that could start a spreadsheet formula gets a leading `'`, so those values differ from the original.
