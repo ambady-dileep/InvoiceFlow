@@ -23,7 +23,7 @@ from rest_framework.test import APITestCase
 
 from apps.imports.models import Upload, UploadRowError
 from apps.imports.parsing import iter_rows
-from apps.imports.tasks import _save_batch, process_upload
+from apps.imports.tasks import _publish, _save_batch, process_upload
 from apps.invoices.models import Invoice
 from apps.invoices.validation import validate_row
 
@@ -666,28 +666,37 @@ class DispatchTests(APITestCase):
         file = SimpleUploadedFile("invoices.csv", csv_content(), content_type="text/csv")
         return self.client.post(self.url, {"file": file}, format="multipart")
 
-    def test_task_is_queued_only_after_commit(self):
-        with mock.patch.object(process_upload, "delay") as delay:
+    def test_task_is_queued_in_a_thread_only_after_commit(self):
+        with mock.patch("apps.imports.tasks.threading.Thread") as thread:
             with self.captureOnCommitCallbacks() as callbacks:
                 response = self.post_file()
 
-            delay.assert_not_called()
+            thread.assert_not_called()
             self.assertEqual(len(callbacks), 1)
 
             callbacks[0]()
 
-        delay.assert_called_once_with(response.data["upload_id"])
+        upload_id = response.data["upload_id"]
+        self.assertEqual(thread.call_args.kwargs["args"], (upload_id,))
+        thread.return_value.start.assert_called_once_with()
+
+    def test_publish_sends_the_task(self):
+        with mock.patch.object(process_upload, "delay") as delay:
+            _publish(5)
+
+        delay.assert_called_once_with(5)
 
     def test_broker_failure_fails_the_upload(self):
+        self.post_file()
+        upload = Upload.objects.get()
+
         with (
             mock.patch.object(process_upload, "delay", side_effect=BrokerError("down")),
             self.assertLogs("apps.imports.tasks", level="ERROR"),
-            self.captureOnCommitCallbacks(execute=True),
         ):
-            response = self.post_file()
+            _publish(upload.id)
 
-        self.assertEqual(response.status_code, status.HTTP_202_ACCEPTED)
-        upload = Upload.objects.get()
+        upload.refresh_from_db()
         self.assertEqual(upload.status, Upload.Status.FAILED)
         self.assertEqual(
             upload.failure_reason, "The upload could not be queued for processing."

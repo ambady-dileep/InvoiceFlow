@@ -27,7 +27,7 @@ class UploadSerializer(serializers.ModelSerializer):
         try:
             with transaction.atomic():
                 upload.save()
-                transaction.on_commit(partial(queue_upload, upload))
+                transaction.on_commit(partial(queue_upload, upload.id))
         except DatabaseError:
             # The file is written before the row is inserted.
             upload.file.delete(save=False)

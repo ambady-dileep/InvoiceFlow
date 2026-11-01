@@ -1,4 +1,5 @@
 import logging
+import threading
 from itertools import batched, islice
 from pathlib import Path
 
@@ -6,7 +7,7 @@ from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
 from django.contrib.auth import get_user_model
-from django.db import InterfaceError, OperationalError, transaction
+from django.db import InterfaceError, OperationalError, connections, transaction
 from django.utils import timezone
 from kombu.exceptions import OperationalError as BrokerError
 
@@ -25,15 +26,24 @@ TRANSIENT_ERRORS = (OperationalError, InterfaceError, OSError)
 DUPLICATE_MESSAGE = "This invoice number already exists."
 
 
-def queue_upload(upload):
-    """Queue processing. Runs after commit, so a broker failure must not be lost."""
+def queue_upload(upload_id):
+    """Publish from a thread, because a failed Redis DNS lookup takes about 4s."""
+    threading.Thread(target=_publish_in_thread, args=(upload_id,)).start()
+
+
+def _publish_in_thread(upload_id):
     try:
-        process_upload.delay(upload.id)
+        _publish(upload_id)
+    finally:
+        connections.close_all()
+
+
+def _publish(upload_id):
+    try:
+        process_upload.delay(upload_id)
     except BrokerError:
-        logger.exception("Could not queue upload %s", upload.id)
-        upload.status = Upload.Status.FAILED
-        upload.failure_reason = "The upload could not be queued for processing."
-        upload.save(update_fields=["status", "failure_reason", "updated_at"])
+        logger.exception("Could not queue upload %s", upload_id)
+        _fail(upload_id, "The upload could not be queued for processing.")
 
 
 @shared_task(bind=True, max_retries=3)
