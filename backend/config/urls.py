@@ -18,6 +18,10 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import include, path
 
+from apps.invoices.export_views import (
+    InvoiceExportDetailView,
+    InvoiceExportDownloadView,
+)
 from config.views import health_check
 
 urlpatterns = [
@@ -26,4 +30,14 @@ urlpatterns = [
     path("api/auth/", include("apps.accounts.urls")),
     path("api/uploads/", include("apps.imports.urls")),
     path("api/invoices/", include("apps.invoices.urls")),
+    path(
+        "api/exports/<int:pk>/",
+        InvoiceExportDetailView.as_view(),
+        name="invoice-export-detail",
+    ),
+    path(
+        "api/exports/<int:pk>/download/",
+        InvoiceExportDownloadView.as_view(),
+        name="invoice-export-download",
+    ),
 ]

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-import { apiFetch, errorMessage, type Upload } from "@/lib/api";
+import { downloadFile, errorMessage, type Upload } from "@/lib/api";
 
 const STATUS_CLASSES: Record<Upload["status"], string> = {
   pending: "bg-slate-100 text-slate-700",
@@ -10,16 +10,6 @@ const STATUS_CLASSES: Record<Upload["status"], string> = {
   completed: "bg-green-100 text-green-800",
   failed: "bg-red-100 text-red-800",
 };
-
-async function downloadErrorReport(uploadId: number) {
-  const response = await apiFetch(`/api/uploads/${uploadId}/errors/`);
-  const url = URL.createObjectURL(await response.blob());
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = `upload-${uploadId}-errors.csv`;
-  link.click();
-  URL.revokeObjectURL(url);
-}
 
 export default function UploadRow({ upload }: { upload: Upload }) {
   const [downloading, setDownloading] = useState(false);
@@ -30,7 +20,10 @@ export default function UploadRow({ upload }: { upload: Upload }) {
     setDownloading(true);
     setError("");
     try {
-      await downloadErrorReport(upload.upload_id);
+      await downloadFile(
+        `/api/uploads/${upload.upload_id}/errors/`,
+        `upload-${upload.upload_id}-errors.csv`,
+      );
     } catch (caught) {
       setError(errorMessage(caught));
     } finally {

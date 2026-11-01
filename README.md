@@ -93,6 +93,16 @@ The response contains `count`, `next`, `previous`, and `results`. Each result ha
 
 Invalid `status`, date, or amount values return `400`. A page that does not exist returns `404`.
 
+## Exports
+
+`POST /api/invoices/export/` takes the same search, filter, and `ordering` query parameters as the invoice list, ignores pagination, and returns `202 Accepted` with an `export_id`. A Celery task then writes the CSV in the background.
+
+`GET /api/exports/{id}/` returns `export_id`, `status` (`pending`, `processing`, `completed`, or `failed`), `row_count`, `failure_reason`, `download_url`, and `created_at`. `download_url` is empty until the export is `completed`.
+
+`GET /api/exports/{id}/download/` returns the CSV, with the columns `invoice_number`, `customer_name`, `amount`, `invoice_date`, and `status`. It needs the same `Authorization` header as other endpoints, because files are never served publicly.
+
+All export endpoints return `404` for another merchant's export. The download also returns `404` until the export is `completed`.
+
 ## Assumptions
 
 The assignment does not define an invoice schema, so these are interpretations:
@@ -118,3 +128,7 @@ The assignment does not define an invoice schema, so these are interpretations:
 - Invoice search scans the merchant's rows, because it has no text index. It took about 450 ms for each query at 500,000 invoices. A `pg_trgm` index would speed this up, at the cost of slower bulk inserts.
 - Deep pages get slower with offset pagination, at about 200 ms at row 400,000.
 - Pagination uses offsets, so an invoice added while a merchant is browsing can shift rows between pages and show a row twice.
+- An export reflects invoices when the task reads them, not when the button was clicked. If an upload is still running, the file may include some of its rows.
+- Export files are kept in storage indefinitely, because there is no cleanup job.
+- The Invoices page tracks only the current export, so a page reload loses the link to it. There is no export history.
+- In exported text cells, a value that could start a spreadsheet formula gets a leading `'`, so those values differ from the original.

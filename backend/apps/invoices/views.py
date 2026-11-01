@@ -1,6 +1,8 @@
+from django.http import HttpRequest, QueryDict
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.request import Request
 
 from apps.invoices.models import Invoice
 from apps.invoices.serializers import InvoiceSerializer
@@ -40,3 +42,12 @@ class InvoiceListView(generics.ListAPIView):
 
     def get_queryset(self):
         return Invoice.objects.filter(merchant=self.request.user)
+
+
+def filtered_invoices(merchant_id, query):
+    """Apply the invoice list's filters, search, and ordering, without pagination."""
+    request = HttpRequest()
+    request.GET = QueryDict(query)
+    view = InvoiceListView()
+    view.request = Request(request)
+    return view.filter_queryset(Invoice.objects.filter(merchant_id=merchant_id))

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.validators import MinValueValidator
@@ -70,3 +71,34 @@ class Invoice(models.Model):
 
     def __str__(self):
         return self.invoice_number
+
+
+def export_file_path(instance, filename):
+    return f"exports/{instance.merchant_id}/{uuid4().hex}.csv"
+
+
+class InvoiceExport(models.Model):
+    class Status(models.TextChoices):
+        PENDING = "pending", "Pending"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    merchant = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="invoice_exports",
+    )
+    # The invoice list's query string, so an export matches what the merchant sees.
+    query = models.TextField(blank=True, default="")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.PENDING
+    )
+    file = models.FileField(upload_to=export_file_path, blank=True)
+    row_count = models.PositiveIntegerField(default=0)
+    failure_reason = models.CharField(max_length=255, blank=True, default="")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Export {self.pk}"

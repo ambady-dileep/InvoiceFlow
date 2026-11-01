@@ -82,7 +82,7 @@ class _Echo:
         return value
 
 
-def _safe_cell(value):
+def safe_cell(value):
     """Keep spreadsheets from treating a cell as a formula."""
     return f"'{value}" if value.startswith(FORMULA_TRIGGERS) else value
 
@@ -97,4 +97,4 @@ def _error_report_lines(upload):
     for row_number, errors in row_errors.iterator():
         for column in sorted(errors):
             for message in errors[column]:
-                yield writer.writerow([row_number, column, _safe_cell(message)])
+                yield writer.writerow([row_number, column, safe_cell(message)])

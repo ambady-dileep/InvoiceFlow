@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import ErrorBanner from "@/components/ErrorBanner";
+import ExportButton from "@/components/ExportButton";
 import InvoiceFilters, { type Filters, NO_FILTERS } from "@/components/InvoiceFilters";
 import InvoiceTable from "@/components/InvoiceTable";
 import Pagination from "@/components/Pagination";
@@ -71,20 +72,23 @@ export default function InvoicesPage() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold text-slate-900">Invoices</h1>
-        {hasFilters && (
-          <button
-            type="button"
-            className="text-sm font-medium text-blue-700 hover:underline"
-            onClick={() => {
-              setFilters(NO_FILTERS);
-              setPage(1);
-            }}
-          >
-            Clear filters
-          </button>
-        )}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-4">
+          <h1 className="text-xl font-semibold text-slate-900">Invoices</h1>
+          {hasFilters && (
+            <button
+              type="button"
+              className="text-sm font-medium text-blue-700 hover:underline"
+              onClick={() => {
+                setFilters(NO_FILTERS);
+                setPage(1);
+              }}
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+        <ExportButton query={query} disabled={!data?.count} />
       </div>
 
       <InvoiceFilters

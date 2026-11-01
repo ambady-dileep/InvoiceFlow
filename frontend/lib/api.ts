@@ -37,6 +37,15 @@ export type UploadStatus = {
 
 export type Upload = UploadStatus & { original_filename: string };
 
+export type InvoiceExport = {
+  export_id: number;
+  status: "pending" | "processing" | "completed" | "failed";
+  row_count: number;
+  failure_reason: string;
+  download_url: string | null;
+  created_at: string;
+};
+
 export class ApiError extends Error {
   constructor(
     message: string,
@@ -143,4 +152,15 @@ export async function apiFetch(path: string, init: RequestInit = {}) {
 export async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await apiFetch(path, init);
   return response.json();
+}
+
+/** Saves a file from an endpoint that needs the token, so a plain link cannot work. */
+export async function downloadFile(path: string, filename: string) {
+  const response = await apiFetch(path);
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
 }
