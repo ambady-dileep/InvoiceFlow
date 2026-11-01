@@ -127,6 +127,12 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
+# Uploaded files. MEDIA_URL is left unset so they are never served publicly.
+
+MEDIA_ROOT = BASE_DIR / "media"
+
+MAX_UPLOAD_SIZE = 25 * 1024 * 1024
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

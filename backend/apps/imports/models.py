@@ -1,5 +1,14 @@
+from pathlib import Path
+from uuid import uuid4
+
 from django.conf import settings
 from django.db import models
+
+
+def upload_file_path(instance, filename):
+    """Build the stored path without using the client's filename."""
+    extension = Path(filename).suffix.lower()
+    return f"uploads/{instance.merchant_id}/{uuid4().hex}{extension}"
 
 
 class Upload(models.Model):
@@ -16,6 +25,7 @@ class Upload(models.Model):
         related_name="uploads",
         db_index=False,
     )
+    file = models.FileField(upload_to=upload_file_path)
     original_filename = models.CharField(max_length=255)
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
