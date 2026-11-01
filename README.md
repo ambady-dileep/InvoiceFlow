@@ -46,4 +46,13 @@ Run the backend tests with `docker compose exec backend python manage.py test`.
 
 All other API endpoints except `GET /api/health/` require an `Authorization: Bearer <access token>` header.
 
+## Assumptions
+
+The assignment does not define an invoice schema, so these are interpretations:
+
+- Invoice columns are `invoice_number`, `customer_name`, `amount`, `invoice_date`, and `status`, which cover the required search, filters, and sorting.
+- All amounts use one currency and cannot be negative.
+- Invoice status is `pending`, `paid`, or `overdue`.
+- Invoice numbers are unique per merchant, including across uploads.
+
 Setup and run instructions for the frontend will be added once it exists.
