@@ -7,13 +7,6 @@
 __pycache__/
 *.py[cod]
 .venv/
-venv/
-.pytest_cache/
-.coverage
-htmlcov/
-db.sqlite3
-media/
-staticfiles/
 
 # Node / Next.js
 node_modules/

@@ -10,7 +10,6 @@ invoiceflow/
 ├── frontend/            Next.js frontend (not yet scaffolded)
 ├── docker-compose.yml   PostgreSQL, Redis, and backend services
 ├── .env.example         Template for local configuration
-├── .gitattributes       Line-ending rules
 ├── .gitignore           Files kept out of Git
 └── README.md
 ```
