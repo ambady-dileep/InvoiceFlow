@@ -7,7 +7,7 @@ from unittest import mock
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.db import DatabaseError, transaction
+from django.db import DatabaseError
 from django.db.models.sql.compiler import SQLInsertCompiler
 from django.test import TestCase, override_settings
 from django.urls import reverse
@@ -303,8 +303,6 @@ class UploadApiTests(APITestCase):
                 side_effect=OSError("/app/media/secret"),
             ),
             self.assertLogs("apps.imports.views", level="ERROR"),
-            # Keeps the failed save from breaking the test's own transaction.
-            transaction.atomic(),
         ):
             response = self.post_file("invoices.csv", CSV_CONTENT)
 

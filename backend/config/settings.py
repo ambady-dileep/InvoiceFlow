@@ -132,6 +132,8 @@ STATIC_URL = "static/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 MAX_UPLOAD_SIZE = 25 * 1024 * 1024
+MAX_UPLOAD_ROWS = 100_000
+MAX_XLSX_UNCOMPRESSED_SIZE = 100 * 1024 * 1024
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -141,6 +143,29 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 # CORS
 
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+
+# Celery
+
+CELERY_BROKER_URL = env("CELERY_BROKER_URL")
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Redelivers a killed worker's task. The visibility timeout must stay above the
+# time limit, or Redis would redeliver tasks that are still running.
+CELERY_TASK_ACKS_LATE = True
+CELERY_TASK_REJECT_ON_WORKER_LOST = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+CELERY_TASK_SOFT_TIME_LIMIT = 600
+CELERY_TASK_TIME_LIMIT = 660
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "visibility_timeout": 900,
+    "socket_connect_timeout": 2,
+}
+# Uploads publish during the request, so an outage must fail quickly.
+CELERY_TASK_PUBLISH_RETRY_POLICY = {
+    "max_retries": 1,
+    "interval_start": 0,
+    "interval_step": 0.2,
+    "interval_max": 0.2,
+}
 
 # Django REST Framework
 

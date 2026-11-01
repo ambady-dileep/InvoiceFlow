@@ -34,6 +34,14 @@ CONTENT_TYPES = {
 CSV_SAMPLE_SIZE = 64 * 1024
 
 
+def normalize_headers(headers):
+    return ["" if header is None else str(header).strip().lower() for header in headers]
+
+
+def missing_columns(headers):
+    return [column for column in REQUIRED_COLUMNS if column not in headers]
+
+
 def validate_upload_file(file):
     extension = Path(file.name).suffix.lower()
     if extension not in CONTENT_TYPES:
@@ -72,8 +80,7 @@ def _validate_csv(file):
     if not rows:
         raise ValidationError("The file has no header row.")
 
-    headers = {header.strip().lower() for header in rows[0]}
-    missing = [column for column in REQUIRED_COLUMNS if column not in headers]
+    missing = missing_columns(normalize_headers(rows[0]))
     if missing:
         raise ValidationError(f"Missing required columns: {', '.join(missing)}.")
     if len(rows) < 2:

@@ -34,6 +34,7 @@ class Upload(models.Model):
     processed_rows = models.PositiveIntegerField(default=0)
     successful_rows = models.PositiveIntegerField(default=0)
     failed_rows = models.PositiveIntegerField(default=0)
+    failure_reason = models.CharField(max_length=255, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

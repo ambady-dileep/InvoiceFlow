@@ -1,5 +1,19 @@
 name: invoiceflow
 
+x-django: &django
+  build: ./backend
+  restart: unless-stopped
+  env_file: .env
+  volumes:
+    # Lets runserver pick up code changes without a rebuild.
+    - ./backend:/app
+    - media_data:/app/media
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
   db:
     image: postgres:17-alpine
@@ -37,20 +51,13 @@ services:
       retries: 5
 
   backend:
-    build: ./backend
-    restart: unless-stopped
-    env_file: .env
+    <<: *django
     ports:
       - "127.0.0.1:8000:8000"
-    volumes:
-      # Lets runserver pick up code changes without a rebuild.
-      - ./backend:/app
-      - media_data:/app/media
-    depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+
+  worker:
+    <<: *django
+    command: celery -A config worker --loglevel=info --concurrency=2
 
 volumes:
   postgres_data:

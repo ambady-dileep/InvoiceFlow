@@ -1,7 +1,10 @@
-from django.db import DatabaseError
+from functools import partial
+
+from django.db import DatabaseError, transaction
 from rest_framework import serializers
 
 from apps.imports.models import Upload
+from apps.imports.tasks import queue_upload
 from apps.imports.validators import validate_upload_file
 
 
@@ -22,7 +25,9 @@ class UploadSerializer(serializers.ModelSerializer):
             file=file,
         )
         try:
-            upload.save()
+            with transaction.atomic():
+                upload.save()
+                transaction.on_commit(partial(queue_upload, upload))
         except DatabaseError:
             # The file is written before the row is inserted.
             upload.file.delete(save=False)
