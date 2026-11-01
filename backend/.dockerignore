@@ -2,6 +2,7 @@
 .env.*
 .venv/
 media/
+*.csv
 __pycache__/
 *.py[cod]
 Dockerfile

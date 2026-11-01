@@ -8,6 +8,7 @@ __pycache__/
 *.py[cod]
 .venv/
 media/
+backend/*.csv
 
 # Node / Next.js
 node_modules/

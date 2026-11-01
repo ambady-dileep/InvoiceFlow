@@ -114,6 +114,28 @@ Caching rows was rejected, because search, filter, and page combinations would r
 
 All export endpoints return `404` for another merchant's export. The download also returns `404` until the export is `completed`.
 
+## Seed data
+
+Generate a large test file to upload through the app:
+
+```bash
+docker compose exec backend python manage.py seed_invoices --rows 100000 --output invoices.csv
+```
+
+The file appears at `backend/invoices.csv`, which Git ignores. An existing file is never replaced.
+
+Or add invoices straight to a merchant, skipping the upload flow:
+
+```bash
+docker compose exec backend python manage.py seed_invoices --rows 100000 --merchant your_username
+```
+
+`--rows` must be between 10,000 and 100,000, and defaults to 10,000. `--seed` defaults to 42, and the same seed gives the same data.
+
+Database seeding always adds rows and never changes existing data. It creates one completed `Upload` for each run, and invoice numbers include that upload's ID, so running it again cannot collide. If it fails, nothing is kept. It does not queue Celery tasks, and it clears the merchant's cached count once at the end.
+
+Every generated row is valid, so the file shows no row errors. Uploading the same file twice reports every row as a duplicate. Seeded uploads have no stored file.
+
 ## Assumptions
 
 The assignment does not define an invoice schema, so these are interpretations:
