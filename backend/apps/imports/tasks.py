@@ -1,21 +1,28 @@
 import logging
+from itertools import batched, islice
 from pathlib import Path
 
 from celery import shared_task
 from celery.exceptions import SoftTimeLimitExceeded
 from django.conf import settings
-from django.db import InterfaceError, OperationalError
+from django.contrib.auth import get_user_model
+from django.db import InterfaceError, OperationalError, transaction
 from django.utils import timezone
 from kombu.exceptions import OperationalError as BrokerError
 
-from apps.imports.models import Upload
+from apps.imports.models import Upload, UploadRowError
 from apps.imports.parsing import UploadFileError, iter_rows
+from apps.invoices.models import Invoice
+from apps.invoices.validation import validate_row
 
 logger = logging.getLogger(__name__)
 
-PROGRESS_INTERVAL = 1000
+User = get_user_model()
+
+BATCH_SIZE = 1000
 RETRY_DELAY = 30
 TRANSIENT_ERRORS = (OperationalError, InterfaceError, OSError)
+DUPLICATE_MESSAGE = "This invoice number already exists."
 
 
 def queue_upload(upload):
@@ -36,8 +43,8 @@ def process_upload(self, upload_id):
         if upload is None:
             return
         _update(upload_id, total_rows=_count_rows(upload))
-        processed = _read_rows(upload)
-        _update(upload_id, status=Upload.Status.COMPLETED, processed_rows=processed)
+        if _process_rows(upload):
+            _update(upload_id, status=Upload.Status.COMPLETED)
     except UploadFileError as error:
         _fail(upload_id, str(error))
     except FileNotFoundError:
@@ -58,16 +65,12 @@ def process_upload(self, upload_id):
 
 
 def _claim(upload_id):
-    """Start or restart an unfinished upload. Finished uploads are left alone."""
+    """Start or resume an unfinished upload. Finished uploads are left alone."""
     claimed = Upload.objects.filter(
         pk=upload_id,
         status__in=[Upload.Status.PENDING, Upload.Status.PROCESSING],
     ).update(
         status=Upload.Status.PROCESSING,
-        total_rows=0,
-        processed_rows=0,
-        successful_rows=0,
-        failed_rows=0,
         failure_reason="",
         updated_at=timezone.now(),
     )
@@ -87,13 +90,69 @@ def _count_rows(upload):
     return total
 
 
-def _read_rows(upload):
-    processed = 0
-    for _ in _rows(upload):
-        processed += 1
-        if processed % PROGRESS_INTERVAL == 0:
-            _update(upload.id, processed_rows=processed)
-    return processed
+def _process_rows(upload):
+    """Save rows in batches, resuming after the last committed batch.
+
+    Rows are read and validated before each transaction, so no database lock is
+    held while parsing. Returns False if another delivery has taken over.
+    """
+    processed = upload.processed_rows
+    for batch in batched(islice(_rows(upload), processed, None), BATCH_SIZE):
+        validated = [(number, *validate_row(row)) for number, row in batch]
+        if not _save_batch(upload, processed, validated):
+            return False
+        processed += len(batch)
+    return True
+
+
+def _save_batch(upload, processed, rows):
+    """Commit a batch's invoices, row errors, and counters together."""
+    with transaction.atomic():
+        current = Upload.objects.select_for_update(no_key=True).get(pk=upload.pk)
+        if (
+            current.status != Upload.Status.PROCESSING
+            or current.processed_rows != processed
+        ):
+            return False
+
+        # Concurrent uploads could otherwise both pass the check below, and the
+        # unique constraint would then reject their whole batch.
+        User.objects.select_for_update(no_key=True).get(pk=upload.merchant_id)
+        numbers = [cleaned.get("invoice_number") for _, cleaned, _ in rows]
+        taken = set(
+            Invoice.objects.filter(
+                merchant_id=upload.merchant_id, invoice_number__in=numbers
+            ).values_list("invoice_number", flat=True)
+        )
+
+        invoices, row_errors = [], []
+        for number, cleaned, errors in rows:
+            if cleaned.get("invoice_number") in taken:
+                errors["invoice_number"] = [DUPLICATE_MESSAGE]
+            if errors:
+                row_errors.append(
+                    UploadRowError(upload=upload, row_number=number, errors=errors)
+                )
+                continue
+            taken.add(cleaned["invoice_number"])
+            invoices.append(
+                Invoice(
+                    merchant_id=upload.merchant_id,
+                    upload=upload,
+                    row_number=number,
+                    **cleaned,
+                )
+            )
+
+        Invoice.objects.bulk_create(invoices)
+        UploadRowError.objects.bulk_create(row_errors)
+        _update(
+            upload.pk,
+            processed_rows=processed + len(rows),
+            successful_rows=current.successful_rows + len(invoices),
+            failed_rows=current.failed_rows + len(row_errors),
+        )
+    return True
 
 
 def _rows(upload):

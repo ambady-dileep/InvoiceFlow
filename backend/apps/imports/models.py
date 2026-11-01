@@ -53,3 +53,23 @@ class Upload(models.Model):
 
     def __str__(self):
         return self.original_filename
+
+
+class UploadRowError(models.Model):
+    # The unique constraint below also serves lookups by upload.
+    upload = models.ForeignKey(
+        Upload, on_delete=models.CASCADE, related_name="row_errors", db_index=False
+    )
+    row_number = models.PositiveIntegerField()
+    # Maps each column name to a list of messages.
+    errors = models.JSONField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["upload", "row_number"], name="upload_row_error_unique"
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.upload_id}:{self.row_number}"

@@ -1,15 +1,105 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import TestCase
+from django.test import SimpleTestCase, TestCase
 
 from apps.imports.models import Upload
 from apps.invoices.models import Invoice
+from apps.invoices.validation import validate_row
 
 User = get_user_model()
+
+
+class ValidateRowTests(SimpleTestCase):
+    def row(self, **overrides):
+        return {
+            "invoice_number": " INV-001 ",
+            "customer_name": "Acme Traders",
+            "amount": "1250.50",
+            "invoice_date": "2026-01-15",
+            "status": "Paid",
+            **overrides,
+        }
+
+    def test_valid_row_is_cleaned(self):
+        cleaned, errors = validate_row(self.row())
+
+        self.assertEqual(errors, {})
+        self.assertEqual(
+            cleaned,
+            {
+                "invoice_number": "INV-001",
+                "customer_name": "Acme Traders",
+                "amount": Decimal("1250.50"),
+                "invoice_date": date(2026, 1, 15),
+                "status": "paid",
+            },
+        )
+
+    def test_excel_values_are_accepted(self):
+        cleaned, errors = validate_row(
+            self.row(
+                invoice_number=1001,
+                amount=10.1,
+                invoice_date=datetime(2026, 1, 15, 9, 30),
+            )
+        )
+
+        self.assertEqual(errors, {})
+        self.assertEqual(cleaned["invoice_number"], "1001")
+        self.assertEqual(cleaned["amount"], Decimal("10.1"))
+        self.assertEqual(cleaned["invoice_date"], date(2026, 1, 15))
+
+    def test_every_error_in_a_row_is_reported(self):
+        _, errors = validate_row({})
+
+        self.assertEqual(
+            errors,
+            {
+                column: ["This field is required."]
+                for column in (
+                    "invoice_number",
+                    "customer_name",
+                    "amount",
+                    "invoice_date",
+                    "status",
+                )
+            },
+        )
+
+    def test_invalid_values_are_rejected(self):
+        cases = [
+            ("invoice_number", "x" * 51),
+            ("invoice_number", "   "),
+            ("invoice_number", "INV\x00"),
+            ("customer_name", "x" * 256),
+            ("amount", "abc"),
+            ("amount", "NaN"),
+            ("amount", "Infinity"),
+            ("amount", "-0.01"),
+            ("amount", "10.123"),
+            ("amount", "1000000000000.00"),
+            ("amount", "1,000.00"),
+            ("amount", True),
+            ("invoice_date", "2026-02-30"),
+            ("invoice_date", "15/01/2026"),
+            ("invoice_date", 46037),
+            ("status", "cancelled"),
+        ]
+        for column, value in cases:
+            with self.subTest(column=column, value=value):
+                _, errors = validate_row(self.row(**{column: value}))
+
+                self.assertEqual(list(errors), [column])
+                self.assertIsInstance(errors[column], list)
+
+    def test_zero_amount_is_valid(self):
+        _, errors = validate_row(self.row(amount="0"))
+
+        self.assertEqual(errors, {})
 
 
 class InvoiceTestCase(TestCase):
