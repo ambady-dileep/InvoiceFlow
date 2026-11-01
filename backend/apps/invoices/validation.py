@@ -5,6 +5,15 @@ from django.core.exceptions import ValidationError
 from apps.imports.validators import REQUIRED_COLUMNS
 from apps.invoices.models import Invoice
 
+# Django's versions of these repeat the cell value. Row errors end up in a CSV
+# report, where a repeated value could become a spreadsheet formula.
+MESSAGES = {
+    ("amount", "invalid"): "Enter a valid number.",
+    ("invoice_date", "invalid"): "Enter a valid date in YYYY-MM-DD format.",
+    ("invoice_date", "invalid_date"): "Enter a valid date in YYYY-MM-DD format.",
+    ("status", "invalid_choice"): "Enter one of: pending, paid, overdue.",
+}
+
 
 def validate_row(row):
     """Return (cleaned values, errors by column), checking every column."""
@@ -19,7 +28,10 @@ def validate_row(row):
             try:
                 cleaned[column] = Invoice._meta.get_field(column).clean(value, None)
             except ValidationError as error:
-                errors[column] = error.messages
+                errors[column] = [
+                    MESSAGES.get((column, item.code), item.messages[0])
+                    for item in error.error_list
+                ]
     return cleaned, errors
 
 

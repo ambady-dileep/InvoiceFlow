@@ -33,3 +33,30 @@ class UploadSerializer(serializers.ModelSerializer):
             upload.file.delete(save=False)
             raise
         return upload
+
+
+class UploadStatusSerializer(serializers.ModelSerializer):
+    upload_id = serializers.IntegerField(source="id")
+    progress = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Upload
+        fields = [
+            "upload_id",
+            "status",
+            "progress",
+            "total_rows",
+            "processed_rows",
+            "successful_rows",
+            "failed_rows",
+            "failure_reason",
+            "created_at",
+        ]
+
+    def get_progress(self, upload):
+        """Return a whole percentage that reaches 100 only on completed uploads."""
+        if upload.status == Upload.Status.COMPLETED:
+            return 100
+        if not upload.total_rows:
+            return 0
+        return min(upload.processed_rows * 100 // upload.total_rows, 99)

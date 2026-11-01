@@ -96,6 +96,43 @@ class ValidateRowTests(SimpleTestCase):
                 self.assertEqual(list(errors), [column])
                 self.assertIsInstance(errors[column], list)
 
+    def test_messages_never_repeat_the_cell_value(self):
+        hostile = [
+            "=cmd|' /C calc'!A0",
+            "+1+1",
+            "-1+1",
+            "@SUM(1)",
+            "x;=1+1",
+            "x\t=1+1",
+            "x\r\n=1+1",
+        ]
+        for value in hostile:
+            for column in ("invoice_number", "customer_name", "amount", "invoice_date", "status"):
+                with self.subTest(column=column, value=value):
+                    _, errors = validate_row(self.row(**{column: value}))
+
+                    for message in errors.get(column, []):
+                        self.assertNotIn(value.strip(), message)
+                        self.assertNotIn("=", message)
+
+    def test_long_values_are_not_repeated(self):
+        _, errors = validate_row(self.row(invoice_number="=" + "x" * 60))
+
+        self.assertNotIn("xxx", errors["invoice_number"][0])
+
+    def test_invalid_values_get_fixed_messages(self):
+        cases = [
+            ("amount", "abc", "Enter a valid number."),
+            ("invoice_date", "15/01/2026", "Enter a valid date in YYYY-MM-DD format."),
+            ("invoice_date", "2026-02-30", "Enter a valid date in YYYY-MM-DD format."),
+            ("status", "cancelled", "Enter one of: pending, paid, overdue."),
+        ]
+        for column, value, message in cases:
+            with self.subTest(column=column, value=value):
+                _, errors = validate_row(self.row(**{column: value}))
+
+                self.assertEqual(errors[column], [message])
+
     def test_zero_amount_is_valid(self):
         _, errors = validate_row(self.row(amount="0"))
 

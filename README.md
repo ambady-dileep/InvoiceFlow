@@ -67,6 +67,12 @@ Rows are saved in batches of 1,000. Valid rows become invoices. Invalid rows are
 
 An upload that fails partway keeps the batches it already committed.
 
+`GET /api/uploads/{id}/status/` returns `upload_id`, `status`, `progress` (a whole percentage that reaches 100 only when the upload is `completed`), `total_rows`, `processed_rows`, `successful_rows`, `failed_rows`, `failure_reason`, and `created_at`. `failure_reason` is empty unless the upload failed. Clients poll this endpoint for progress, which keeps the setup simple and needs no open connections.
+
+`GET /api/uploads/{id}/errors/` downloads a CSV with the columns `row_number`, `column`, and `message`, and one line per message. An upload with no row errors returns only the header. The response is streamed, so large reports use little memory. Messages never repeat uploaded cell values, and any cell that could start a spreadsheet formula gets a leading `'`, so the report is safe to open in Excel with any delimiter.
+
+Both endpoints return `404` for another merchant's upload, the same as for one that does not exist.
+
 ## Assumptions
 
 The assignment does not define an invoice schema, so these are interpretations:

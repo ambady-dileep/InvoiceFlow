@@ -1,3 +1,4 @@
+import csv
 import io
 import tempfile
 import zipfile
@@ -9,12 +10,13 @@ from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import DatabaseError
 from django.db.models.sql.compiler import SQLInsertCompiler
+from django.http import StreamingHttpResponse
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from apps.imports.models import Upload
+from apps.imports.models import Upload, UploadRowError
 
 User = get_user_model()
 
@@ -309,3 +311,287 @@ class UploadApiTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_503_SERVICE_UNAVAILABLE)
         self.assertNotIn("/app/media", str(response.data))
         self.assertFalse(Upload.objects.exists())
+
+
+class UploadResultTestCase(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.merchant = User.objects.create_user("merchant", "m@example.com", "pass")
+        cls.other_merchant = User.objects.create_user("other", "o@example.com", "pass")
+
+    def setUp(self):
+        self.client.force_authenticate(self.merchant)
+
+    def make_upload(self, merchant=None, **fields):
+        return Upload.objects.create(
+            merchant=merchant or self.merchant,
+            original_filename="invoices.csv",
+            file="uploads/1/invoices.csv",
+            **fields,
+        )
+
+
+class UploadStatusApiTests(UploadResultTestCase):
+    def get_status(self, upload):
+        return self.client.get(reverse("upload-status", args=[upload.id]))
+
+    def test_every_status_is_returned(self):
+        for value in Upload.Status.values:
+            with self.subTest(status=value):
+                upload = self.make_upload(status=value)
+
+                response = self.get_status(upload)
+
+                self.assertEqual(response.status_code, status.HTTP_200_OK)
+                self.assertEqual(response.data["status"], value)
+
+    def test_response_contains_the_upload_counts(self):
+        upload = self.make_upload(
+            status=Upload.Status.COMPLETED,
+            total_rows=10,
+            processed_rows=10,
+            successful_rows=7,
+            failed_rows=3,
+        )
+
+        response = self.get_status(upload)
+
+        self.assertEqual(
+            set(response.data),
+            {
+                "upload_id",
+                "status",
+                "progress",
+                "total_rows",
+                "processed_rows",
+                "successful_rows",
+                "failed_rows",
+                "failure_reason",
+                "created_at",
+            },
+        )
+        self.assertEqual(response.data["upload_id"], upload.id)
+        self.assertEqual(response.data["total_rows"], 10)
+        self.assertEqual(response.data["processed_rows"], 10)
+        self.assertEqual(response.data["successful_rows"], 7)
+        self.assertEqual(response.data["failed_rows"], 3)
+        self.assertEqual(response.data["failure_reason"], "")
+
+    def test_progress_reflects_the_rows_processed(self):
+        cases = [
+            (Upload.Status.PENDING, 0, 0, 0),
+            (Upload.Status.PROCESSING, 0, 100, 0),
+            (Upload.Status.PROCESSING, 1, 3, 33),
+            (Upload.Status.PROCESSING, 999, 1000, 99),
+            (Upload.Status.FAILED, 0, 0, 0),
+            (Upload.Status.FAILED, 40, 100, 40),
+        ]
+        for value, processed, total, expected in cases:
+            with self.subTest(status=value, processed=processed, total=total):
+                upload = self.make_upload(
+                    status=value, processed_rows=processed, total_rows=total
+                )
+
+                self.assertEqual(self.get_status(upload).data["progress"], expected)
+
+    def test_only_a_completed_upload_shows_100(self):
+        cases = [
+            (Upload.Status.PENDING, 99),
+            (Upload.Status.PROCESSING, 99),
+            (Upload.Status.FAILED, 99),
+            (Upload.Status.COMPLETED, 100),
+        ]
+        for value, expected in cases:
+            with self.subTest(status=value):
+                upload = self.make_upload(
+                    status=value, processed_rows=100, total_rows=100
+                )
+
+                self.assertEqual(self.get_status(upload).data["progress"], expected)
+
+    def test_failure_reason_is_returned(self):
+        upload = self.make_upload(
+            status=Upload.Status.FAILED, failure_reason="The file has no invoice rows."
+        )
+
+        response = self.get_status(upload)
+
+        self.assertEqual(response.data["failure_reason"], "The file has no invoice rows.")
+
+    def test_unauthenticated_request_is_rejected(self):
+        upload = self.make_upload()
+        self.client.force_authenticate(None)
+
+        self.assertEqual(
+            self.get_status(upload).status_code, status.HTTP_401_UNAUTHORIZED
+        )
+
+    def test_other_merchants_upload_looks_missing(self):
+        upload = self.make_upload(merchant=self.other_merchant)
+
+        response = self.get_status(upload)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_missing_upload_returns_not_found(self):
+        response = self.client.get(reverse("upload-status", args=[999999]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_write_methods_are_not_allowed(self):
+        upload = self.make_upload()
+        url = reverse("upload-status", args=[upload.id])
+
+        for method in (self.client.post, self.client.put, self.client.delete):
+            with self.subTest(method=method.__name__):
+                self.assertEqual(
+                    method(url).status_code, status.HTTP_405_METHOD_NOT_ALLOWED
+                )
+
+
+class UploadErrorReportApiTests(UploadResultTestCase):
+    header = ["row_number", "column", "message"]
+
+    def get_report(self, upload, **headers):
+        return self.client.get(reverse("upload-errors", args=[upload.id]), **headers)
+
+    def read_csv(self, response):
+        content = b"".join(response.streaming_content).decode("utf-8-sig")
+        return list(csv.reader(io.StringIO(content)))
+
+    def add_errors(self, upload, *rows):
+        UploadRowError.objects.bulk_create(
+            UploadRowError(upload=upload, row_number=number, errors=errors)
+            for number, errors in rows
+        )
+
+    def test_report_is_a_streamed_csv_download(self):
+        upload = self.make_upload()
+
+        response = self.get_report(upload)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsInstance(response, StreamingHttpResponse)
+        self.assertEqual(response["Content-Type"], "text/csv; charset=utf-8")
+        self.assertEqual(
+            response["Content-Disposition"],
+            f'attachment; filename="upload-{upload.id}-errors.csv"',
+        )
+
+    def test_report_has_one_line_per_message_in_row_order(self):
+        upload = self.make_upload(status=Upload.Status.COMPLETED)
+        self.add_errors(
+            upload,
+            (9, {"status": ["Invalid status."]}),
+            (3, {"amount": ["Not a number.", "Too long."], "customer_name": ["Required."]}),
+        )
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual(
+            rows,
+            [
+                self.header,
+                ["3", "amount", "Not a number."],
+                ["3", "amount", "Too long."],
+                ["3", "customer_name", "Required."],
+                ["9", "status", "Invalid status."],
+            ],
+        )
+
+    def test_messages_with_commas_quotes_and_unicode_stay_in_one_cell(self):
+        upload = self.make_upload()
+        message = 'Value "a,b" is “wrong”\nhere'
+        self.add_errors(upload, (2, {"status": [message]}))
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual(rows[1], ["2", "status", message])
+
+    def test_cells_cannot_start_as_a_formula(self):
+        upload = self.make_upload()
+        triggers = ["=1+1", "+1+1", "-1+1", "@SUM(1)", "\t=1+1", "\r=1+1", "\n=1+1"]
+        self.add_errors(
+            upload,
+            *((number, {"status": [value]}) for number, value in enumerate(triggers, 2)),
+        )
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual([row[2] for row in rows[1:]], [f"'{value}" for value in triggers])
+
+    def test_harmless_messages_are_not_changed(self):
+        upload = self.make_upload()
+        self.add_errors(upload, (2, {"status": ["Enter a valid number."]}))
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual(rows[1], ["2", "status", "Enter a valid number."])
+
+    def test_report_starts_with_a_byte_order_mark_once(self):
+        upload = self.make_upload()
+        self.add_errors(upload, (2, {"status": ["Bad."]}))
+
+        content = b"".join(self.get_report(upload).streaming_content)
+
+        self.assertTrue(content.startswith(b"\xef\xbb\xbfrow_number,"))
+        self.assertEqual(content.count(b"\xef\xbb\xbf"), 1)
+
+    def test_upload_without_errors_returns_only_the_header(self):
+        upload = self.make_upload(status=Upload.Status.COMPLETED)
+
+        self.assertEqual(self.read_csv(self.get_report(upload)), [self.header])
+
+    def test_failed_upload_without_row_errors_returns_only_the_header(self):
+        upload = self.make_upload(status=Upload.Status.FAILED, failure_reason="Bad file.")
+
+        self.assertEqual(self.read_csv(self.get_report(upload)), [self.header])
+
+    def test_report_includes_only_that_uploads_errors(self):
+        upload = self.make_upload()
+        other_upload = self.make_upload()
+        self.add_errors(upload, (2, {"status": ["Mine."]}))
+        self.add_errors(other_upload, (2, {"status": ["Not mine."]}))
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual(rows[1:], [["2", "status", "Mine."]])
+
+    def test_large_report_keeps_every_row_in_order(self):
+        upload = self.make_upload()
+        self.add_errors(
+            upload, *((number, {"status": ["Bad."]}) for number in range(2, 5002))
+        )
+
+        rows = self.read_csv(self.get_report(upload))
+
+        self.assertEqual([int(row[0]) for row in rows[1:]], list(range(2, 5002)))
+
+    def test_text_csv_accept_header_is_supported(self):
+        upload = self.make_upload()
+
+        response = self.get_report(upload, HTTP_ACCEPT="text/csv")
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+    def test_unauthenticated_request_is_rejected(self):
+        upload = self.make_upload()
+        self.client.force_authenticate(None)
+
+        response = self.get_report(upload)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_other_merchants_report_looks_missing(self):
+        upload = self.make_upload(merchant=self.other_merchant)
+        self.add_errors(upload, (2, {"status": ["Private."]}))
+
+        response = self.get_report(upload)
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        self.assertNotIn(b"Private", response.content)
+
+    def test_missing_upload_returns_not_found(self):
+        response = self.client.get(reverse("upload-errors", args=[999999]))
+
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
