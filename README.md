@@ -34,4 +34,16 @@ Copy `.env.example` to `.env` and replace the placeholders, then run `docker com
 Apply migrations with `docker compose exec backend python manage.py migrate`.
 Check the backend at <http://localhost:8000/api/health/>.
 
+Run the backend tests with `docker compose exec backend python manage.py test`.
+
+## Authentication
+
+| Endpoint | Body | Returns |
+|---|---|---|
+| `POST /api/auth/register/` | `username`, `email`, `password` | The new merchant |
+| `POST /api/auth/login/` | `username`, `password` | `access` and `refresh` tokens |
+| `POST /api/auth/token/refresh/` | `refresh` | A new `access` token |
+
+All other API endpoints except `GET /api/health/` require an `Authorization: Bearer <access token>` header.
+
 Setup and run instructions for the frontend will be added once it exists.
