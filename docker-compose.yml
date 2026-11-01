@@ -52,12 +52,25 @@ services:
 
   backend:
     <<: *django
+    command: sh -c "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"
     ports:
       - "127.0.0.1:8000:8000"
 
   worker:
     <<: *django
     command: celery -A config worker --loglevel=info --concurrency=2
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # The browser calls the API, so this is the published host address.
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      - backend
 
 volumes:
   postgres_data:

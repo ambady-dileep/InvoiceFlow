@@ -7,8 +7,8 @@ InvoiceFlow is in early setup. The application code has not been added yet.
 ```text
 invoiceflow/
 ├── backend/             Django backend
-├── frontend/            Next.js frontend (not yet scaffolded)
-├── docker-compose.yml   PostgreSQL, Redis, backend, and worker services
+├── frontend/            Next.js frontend
+├── docker-compose.yml   PostgreSQL, Redis, backend, worker, and frontend services
 ├── .env.example         Template for local configuration
 ├── .gitignore           Files kept out of Git
 └── README.md
@@ -23,15 +23,16 @@ invoiceflow/
 
 ## Local services
 
-Copy `.env.example` to `.env` and replace the placeholders, then run `docker compose up -d`.
+Copy `.env.example` to `.env` and replace the placeholders, then run `docker compose up -d --build`. The backend applies migrations when it starts.
 
 | Service | Host address |
 |---|---|
 | PostgreSQL | `localhost:5433` |
 | Redis | `localhost:6380` |
 | Backend | `localhost:8000` |
+| Frontend | `localhost:3000` |
 
-Apply migrations with `docker compose exec backend python manage.py migrate`.
+Open the app at <http://localhost:3000>. Use `localhost`, not `127.0.0.1`, because the API only allows that origin.
 Check the backend at <http://localhost:8000/api/health/>.
 
 Run the backend tests with `docker compose exec backend python manage.py test`.
@@ -117,5 +118,3 @@ The assignment does not define an invoice schema, so these are interpretations:
 - Invoice search scans the merchant's rows, because it has no text index. It took about 450 ms for each query at 500,000 invoices. A `pg_trgm` index would speed this up, at the cost of slower bulk inserts.
 - Deep pages get slower with offset pagination, at about 200 ms at row 400,000.
 - Pagination uses offsets, so an invoice added while a merchant is browsing can shift rows between pages and show a row twice.
-
-Setup and run instructions for the frontend will be added once it exists.
