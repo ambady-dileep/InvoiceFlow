@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
-from django.test import SimpleTestCase, TestCase
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIRequestFactory, APITestCase
@@ -290,6 +290,9 @@ class InvoiceConstraintTests(InvoiceTestCase):
         self.assertRejectedByDatabase(self.build(status="cancelled"))
 
 
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
+)
 class InvoiceListTestCase(APITestCase):
     url = reverse("invoice-list")
 

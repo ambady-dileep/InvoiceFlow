@@ -1,5 +1,6 @@
 import logging
 import threading
+from functools import partial
 from itertools import batched, islice
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from kombu.exceptions import OperationalError as BrokerError
 
 from apps.imports.models import Upload, UploadRowError
 from apps.imports.parsing import UploadFileError, iter_rows
+from apps.invoices.cache import invalidate_invoice_counts
 from apps.invoices.models import Invoice
 from apps.invoices.validation import validate_row
 
@@ -156,6 +158,10 @@ def _save_batch(upload, processed, rows):
 
         Invoice.objects.bulk_create(invoices)
         UploadRowError.objects.bulk_create(row_errors)
+        if invoices:
+            transaction.on_commit(
+                partial(invalidate_invoice_counts, upload.merchant_id)
+            )
         _update(
             upload.pk,
             processed_rows=processed + len(rows),

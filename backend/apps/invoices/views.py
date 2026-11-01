@@ -1,17 +1,35 @@
+from django.core.paginator import Paginator
 from django.http import HttpRequest, QueryDict
+from django.utils.functional import cached_property
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters, generics
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.request import Request
 
+from apps.invoices.cache import cached_count
 from apps.invoices.models import Invoice
 from apps.invoices.serializers import InvoiceSerializer
+
+
+class CachedCountPaginator(Paginator):
+    def __init__(self, object_list, per_page, request):
+        super().__init__(object_list, per_page)
+        self.request = request
+
+    @cached_property
+    def count(self):
+        return cached_count(
+            self.request.user.id, self.request.query_params, self.object_list.count
+        )
 
 
 class InvoicePagination(PageNumberPagination):
     page_size = 25
     page_size_query_param = "page_size"
     max_page_size = 100
+
+    def django_paginator_class(self, object_list, per_page):
+        return CachedCountPaginator(object_list, per_page, self.request)
 
 
 class StableOrderingFilter(filters.OrderingFilter):

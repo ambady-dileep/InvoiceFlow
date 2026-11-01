@@ -93,6 +93,17 @@ The response contains `count`, `next`, `previous`, and `results`. Each result ha
 
 Invalid `status`, date, or amount values return `400`. A page that does not exist returns `404`.
 
+## Caching
+
+Redis caches one thing: the invoice list's total `count` for each combination of filters. It is the slow query that repeats without changing, because every page turn and sort recounts the same rows. It took about 62 ms unfiltered and 450 ms for a search at 500,000 invoices. Invoice rows are never cached, so the list always shows current data.
+
+- **Key:** `invoices:count:{merchant_id}:{version}:{hash of the filters}`. Page, page size, and ordering are left out, so they share one count. The merchant ID keeps merchants apart.
+- **Invalidation:** each merchant has a random version token. After a batch of invoices commits, the worker deletes that merchant's token, so all their cached counts stop being read at once, and the next request creates a new token. Invalidating after the commit means a reader cannot cache the old total again under the new token.
+- **Expiry:** counts expire after 5 minutes, which also limits staleness if an invalidation fails or invoices are removed some other way, such as by deleting a merchant.
+- **Failure:** if Redis is unavailable, the list counts from the database instead of failing. While the Redis container is stopped, each list request takes about 4 seconds, because the failed DNS lookup runs inside the request. A refused connection fails immediately.
+
+Caching rows was rejected, because search, filter, and page combinations would rarely repeat, and it would risk showing stale invoices. Dashboard summary counts were rejected, because they would need a new endpoint and screen.
+
 ## Exports
 
 `POST /api/invoices/export/` takes the same search, filter, and `ordering` query parameters as the invoice list, ignores pagination, and returns `202 Accepted` with an `export_id`. A Celery task then writes the CSV in the background.
@@ -127,6 +138,7 @@ The assignment does not define an invoice schema, so these are interpretations:
 - A file that repeatedly kills the worker would be redelivered each time. The size limits make this unlikely.
 - Invoice search scans the merchant's rows, because it has no text index. It took about 450 ms for each query at 500,000 invoices. A `pg_trgm` index would speed this up, at the cost of slower bulk inserts.
 - Deep pages get slower with offset pagination, at about 200 ms at row 400,000.
+- The cached total is cleared after each batch, so it stays current during an upload, but the cache gives little benefit while one is running.
 - Pagination uses offsets, so an invoice added while a merchant is browsing can shift rows between pages and show a row twice.
 - An export reflects invoices when the task reads them, not when the button was clicked. If an upload is still running, the file may include some of its rows.
 - Export files are kept in storage indefinitely, because there is no cleanup job.

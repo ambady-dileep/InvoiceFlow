@@ -25,6 +25,9 @@ User = get_user_model()
 COLUMNS = ["invoice_number", "customer_name", "amount", "invoice_date", "status"]
 
 
+@override_settings(
+    CACHES={"default": {"BACKEND": "django.core.cache.backends.dummy.DummyCache"}}
+)
 class ExportTestCase(APITestCase):
     url = reverse("invoice-export")
 
